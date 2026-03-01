@@ -1,3 +1,45 @@
+name: 每日股票分析
+
+on:
+  schedule:
+    - cron: '0 10 * * 1-5'  # 每周一至周五18:00（北京时间）自动运行
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      mode:
+        description: '运行模式'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - market-only
+          - stocks-only
+      force_run:
+        description: '强制运行（跳过交易日检查）'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: stock-analysis
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v3
+
+      - name: 设置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: 安装依赖工具
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq bc
+
       - name: 自动生成股票列表
         id: generate_stock_list
         run: |
@@ -77,3 +119,15 @@
           FINAL_LIST=$(echo "$FINAL_LIST" | sed 's/^,//;s/,$//;s/,,/,/g')
           echo "最终STOCK_LIST: $FINAL_LIST"
           echo "STOCK_LIST=$FINAL_LIST" >> $GITHUB_OUTPUT
+
+      - name: 运行每日股票分析
+        run: |
+          echo "开始运行每日股票分析..."
+          echo "使用的股票列表: ${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
+          # 安装项目依赖
+          pip install -r requirements.txt
+          # 运行项目（根据项目实际命令调整）
+          python main.py --stock_list "${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
