@@ -1,51 +1,44 @@
-name: 每日股票分析
-
-on:
-  schedule:
-    - cron: '0 10 * * 1-5'  # 每周一至周五18:00（北京时间）自动运行
-  workflow_dispatch:  # 允许手动触发
-
-jobs:
-  stock-analysis:
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v3
-
-      - name: 设置Python环境
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-
-      - name: 安装依赖工具
-        run: |
-          sudo apt-get update && sudo apt-get install -y jq bc
-
       - name: 自动生成股票列表
         id: generate_stock_list
         run: |
+          set -e  # 启用严格模式，遇到错误立即退出
+          
           # ====================== 1. 固定的市场指数 ======================
           BASE_LIST="000001,399100,000016,000010,000009"
           echo "固定市场指数: $BASE_LIST"
 
-          # ====================== 2. 自动抓取热点板块前10 ======================
+          # ====================== 2. 自动抓取热点板块前10（增强版） ======================
           echo "正在抓取热点板块前10..."
           MAX_RETRIES=3
-          RETRY_DELAY=2
+          RETRY_DELAY=5
           PLATES=""
           for ((i=1; i<=MAX_RETRIES; i++)); do
             echo "第 $i 次尝试抓取板块..."
-            PLATES_RESPONSE=$(curl -s -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-              "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12")
+            # 1. 打印完整请求URL，方便排查
+            echo "请求URL: https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12"
+            # 2. 执行curl并打印响应内容
+            PLATES_RESPONSE=$(curl -s -v -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+              "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12" 2>&1)
+            echo "接口响应: $PLATES_RESPONSE"
+            
+            # 3. 检查响应是否包含有效数据
             if echo "$PLATES_RESPONSE" | grep -q '"data":'; then
-              PLATES=$(echo "$PLATES_RESPONSE" | jq -r '.data.diff | map(.f12) | join(",")')
-              echo "热点板块前10: $PLATES"
-              break
+              PLATES=$(echo "$PLATES_RESPONSE" | jq -r '.data.diff | map(.f12) | join(",")' || echo "")
+              if [ -n "$PLATES" ]; then
+                echo "热点板块前10: $PLATES"
+                break
+              else
+                echo "解析板块数据失败"
+              fi
             else
               echo "第 $i 次板块抓取失败"
-              if [ $i -lt $MAX_RETRIES ]; then sleep $((RETRY_DELAY * i)); fi
+              if [ $i -lt $MAX_RETRIES ]; then 
+                echo "等待 $RETRY_DELAY 秒后重试..."
+                sleep $RETRY_DELAY
+              fi
             fi
           done
+          
           # 兜底板块（如果抓取失败）
           if [ -z "$PLATES" ]; then
             PLATES="801740,885531,885451,801120,801750,801080,801110,801730,801760,801880"
@@ -60,19 +53,21 @@ jobs:
             STOCKS_RESPONSE=$(curl -s -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
               "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f62&fs=m:0+t:6,m:0+t:80&fields=f12,f2")
             if echo "$STOCKS_RESPONSE" | grep -q '"data":'; then
-              # 过滤沪深主板（60/000开头）+ 股价5-35元，取前50
               RAW_STOCKS=$(echo "$STOCKS_RESPONSE" | jq -r '.data.diff | map(select(.f12 | test("^60|^000"))) | map({code: .f12, price: .f2})')
-              FILTERED_STOCKS=$(echo "$RAW_STOCKS" | jq -r 'map(select(.price >= 5 and .price <= 35)) | .[0:50] | map(.code) | join(",")')
+              FILTERED_STOCKS=$(echo "$RAW_STOCKS" | jq -r 'map(select(.price >= 5 and .price <= 35)) | .[0:50] | map(.code) | join(",")' || echo "")
               if [ -n "$FILTERED_STOCKS" ]; then
                 STOCKS=$FILTERED_STOCKS
                 echo "过滤后个股前50: $STOCKS"
                 break
+              else
+                echo "过滤个股数据失败"
               fi
             else
               echo "第 $i 次个股抓取失败"
-              if [ $i -lt $MAX_RETRIES ]; then sleep $((RETRY_DELAY * i)); fi
+              if [ $i -lt $MAX_RETRIES ]; then sleep $RETRY_DELAY; fi
             fi
           done
+          
           # 兜底个股（如果抓取失败）
           if [ -z "$STOCKS" ]; then
             STOCKS="600000,600008,600009,600015,600016,600018,600019,600028,600029,600030,600031,600036,600048,600050,600089,600104,600111,600123,600143,600150,600166,600177,600183,600276,600309,600340,600362,600406,600438,600482,600547,600585,600604,600690,600703,600745,600795,600887,600900,600918,600958,600989,600999,000001,000002,000004,000005,000006,000008,000012"
@@ -81,22 +76,6 @@ jobs:
 
           # ====================== 4. 合并生成最终STOCK_LIST ======================
           FINAL_LIST="$BASE_LIST,$PLATES,$STOCKS"
-          # 清理多余逗号
           FINAL_LIST=$(echo "$FINAL_LIST" | sed 's/^,//;s/,$//;s/,,/,/g')
           echo "最终STOCK_LIST: $FINAL_LIST"
-          # 输出到GitHub输出
           echo "STOCK_LIST=$FINAL_LIST" >> $GITHUB_OUTPUT
-
-      - name: 运行每日股票分析
-        run: |
-          echo "开始运行每日股票分析..."
-          echo "使用的股票列表: ${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
-          # 安装项目依赖
-          pip install -r requirements.txt
-          # 运行项目（根据项目实际命令调整）
-          python main.py --stock_list "${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
-          # 其他需要的环境变量，比如：
-          # EASTMONEY_TOKEN: ${{ secrets.EASTMONEY_TOKEN }}
