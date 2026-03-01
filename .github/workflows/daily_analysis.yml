@@ -34,7 +34,7 @@ jobs:
       - name: 设置Python环境
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'  # 关键修改：从3.9改成3.10
+          python-version: '3.10'  # 关键：Python 3.10兼容所有依赖
 
       - name: 安装依赖工具
         run: |
@@ -126,8 +126,8 @@ jobs:
           echo "使用的股票列表: ${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
           # 安装项目依赖
           pip install -r requirements.txt
-          # 运行项目（根据项目实际命令调整）
-          python main.py --stock_list "${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
+          # 关键修改：1. 参数名改为--stocks 2. 增加空格 3. 处理中文参数名兼容
+          python main.py --stocks "${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
