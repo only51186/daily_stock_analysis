@@ -1,7 +1,7 @@
       - name: 自动生成股票列表
         id: generate_stock_list
         run: |
-          set -e  # 启用严格模式，遇到错误立即退出
+          set +e  # 关闭严格模式，允许单个命令失败，继续执行后续步骤
           
           # ====================== 1. 固定的市场指数 ======================
           BASE_LIST="000001,399100,000016,000010,000009"
@@ -14,14 +14,12 @@
           PLATES=""
           for ((i=1; i<=MAX_RETRIES; i++)); do
             echo "第 $i 次尝试抓取板块..."
-            # 1. 打印完整请求URL，方便排查
-            echo "请求URL: https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12"
-            # 2. 执行curl并打印响应内容
-            PLATES_RESPONSE=$(curl -s -v -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-              "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12" 2>&1)
+            # 执行curl并打印响应内容
+            PLATES_RESPONSE=$(curl -s -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+              "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12")
             echo "接口响应: $PLATES_RESPONSE"
             
-            # 3. 检查响应是否包含有效数据
+            # 检查响应是否包含有效数据
             if echo "$PLATES_RESPONSE" | grep -q '"data":'; then
               PLATES=$(echo "$PLATES_RESPONSE" | jq -r '.data.diff | map(.f12) | join(",")' || echo "")
               if [ -n "$PLATES" ]; then
