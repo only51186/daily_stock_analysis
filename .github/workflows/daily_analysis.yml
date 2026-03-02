@@ -120,12 +120,16 @@ jobs:
           echo "最终STOCK_LIST: $FINAL_LIST"
           echo "STOCK_LIST=$FINAL_LIST" >> $GITHUB_OUTPUT
 
+      - name: 安装Python依赖（含可视化所需包）
+        run: |
+          pip install -r requirements.txt
+          # 新增：安装可视化所需依赖
+          pip install pandas tushare requests python-dotenv echarts-python
+
       - name: 运行每日股票分析
         run: |
           echo "开始运行每日股票分析..."
           echo "使用的股票列表: ${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
-          # 安装项目依赖
-          pip install -r requirements.txt
           # 关键修改：1. 参数名改为--stocks 2. 增加空格 3. 处理中文参数名兼容
           python main.py --stocks "${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
           # 新增：列出生成的文件，方便排查
@@ -135,13 +139,13 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
 
-      # ====================== 修复：使用英文文件名 ======================
+      # ====================== 修复：使用英文文件名 + 新增HTML文件上传 ======================
       - name: 上传股票分析结果文件
         uses: actions/upload-artifact@v4
         with:
           # 关键修改：把中文名称改为英文，避免URL编码问题
           name: daily-stock-analysis-result-${{ github.run_id }}
-          # 覆盖常见的结果文件格式，根据main.py实际生成的文件调整
+          # 覆盖常见的结果文件格式，新增HTML文件
           path: |
             ./result*.csv
             ./analysis*.csv
@@ -152,5 +156,6 @@ jobs:
             ./*.xlsx
             ./*.json
             ./*.png
+            ./*.html  # 新增：上传可视化网页
           # 即使没有生成文件也不报错（兜底）
           if-no-files-found: warn
