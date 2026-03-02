@@ -148,7 +148,7 @@ def analyze_stock(stock_data):
         debug_logger.error(f"分析 {stock_data['code']} 失败: {str(e)}")
         return None
 
-# ====================== 4. 可视化网页生成（彻底修复f-string语法错误） ======================
+# ====================== 4. 可视化网页生成（彻底修复语法错误） ======================
 def generate_visual_report(analysis_results, output_path="stock_analysis_report.html"):
     """生成股票分析可视化网页"""
     if not analysis_results:
@@ -164,10 +164,10 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
         change_data = df[df['change'].notna()][['name', 'change']].to_dict('records')
         stock_table_data = df[['code', 'name', 'price', 'change', 'score', 'advice', 'trend']].to_dict('records')
 
-        # ====================== 核心修复：提前单独生成表格HTML，彻底规避f-string嵌套报错 ======================
+        # 提前单独生成表格HTML，彻底规避f-string嵌套报错
         table_rows = ""
         for item in stock_table_data:
-            # 单独处理每一行的数值格式化，完全不嵌套在大f-string里
+            # 单独处理每一行的数值格式化
             price_text = f"{item['price']:.2f}" if item['price'] is not None else "-"
             change_text = f"{item['change']:.2f}" if item['change'] is not None else "-"
             change_color = "red" if (item['change'] is not None and item['change'] > 0) else "green"
@@ -186,7 +186,7 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
             </tr>
             """
 
-        # 图表数据转JSON字符串，避免f-string里的列表/字典嵌套报错
+        # 图表数据转JSON字符串，避免f-string嵌套报错
         top10_names = json.dumps([item['name'] for item in top10_score], ensure_ascii=False)
         top10_scores = json.dumps([item['score'] for item in top10_score], ensure_ascii=False)
         change_names = json.dumps([item['name'] for item in change_data], ensure_ascii=False)
@@ -200,7 +200,7 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
         avg_change = f"{df[df['change'].notna()]['change'].mean():.2f}"
         report_date = datetime.now().strftime('%Y-%m-%d')
         
-        # HTML模板（彻底移除所有嵌套f-string，无任何符号冲突）
+        # HTML模板（无任何嵌套f-string，彻底规避语法错误）
         html_content = f"""
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -550,10 +550,25 @@ def main(stock_codes):
     
     logger.info("===== 每日股票分析完成 =====")
 
-# ====================== 7. 命令行入口 ======================
+# ====================== 7. 命令行入口（核心容错修复） ======================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='每日股票分析工具')
-    parser.add_argument('--codes', nargs='+', required=True, help='股票代码列表，如：600000 000001')
+    # 核心修复：把required=True改成False，不再强制必填，增加兜底逻辑
+    parser.add_argument('--codes', nargs='+', required=False, help='股票代码列表，如：600000 000001')
     args = parser.parse_args()
+
+    # 兜底逻辑1：如果命令行没传--codes，自动从环境变量STOCK_LIST读取
+    stock_codes = args.codes
+    if not stock_codes:
+        stock_list_env = os.getenv("STOCK_LIST", "")
+        if stock_list_env:
+            # 把逗号分隔的股票代码拆分成列表
+            stock_codes = [code.strip() for code in stock_list_env.split(',') if code.strip()]
+            logger.info(f"从环境变量STOCK_LIST读取到股票列表：{stock_codes}")
+        else:
+            # 兜底逻辑2：如果环境变量也没有，直接报错退出，给出明确提示
+            logger.error("未获取到股票列表！请通过--codes参数传入，或设置STOCK_LIST环境变量")
+            raise SystemExit("错误：未指定任何股票代码")
     
-    main(args.codes)
+    # 执行主函数
+    main(stock_codes)
