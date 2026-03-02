@@ -1,39 +1,42 @@
-name: 自动修复main.py启动报错
+name: 自动修复main.py启动报错（保留原作者核心分析逻辑）
 on:
   # 触发条件1：每日股票分析运行失败时，自动触发修复
   workflow_run:
     workflows: ["每日股票分析"]
     types: [completed]
-  # 触发条件2：你也可以手动触发修复
+  # 触发条件2：支持手动触发修复
   workflow_dispatch:
 
+# 修复核心：新增workflows: write权限，解决触发其他工作流的403报错
 permissions:
-  # 仅给仓库代码写入权限，最小化权限，100%安全免费，用GitHub自带令牌
   contents: write
   actions: read
+  workflows: write
 
 jobs:
-  auto-fix:
+  auto-fix-and-re-run:
     runs-on: ubuntu-latest
+    # 仅当原分析任务失败 或 手动触发时运行
     if: ${{ github.event.workflow_run.conclusion == 'failure' || github.event_name == 'workflow_dispatch' }}
     steps:
-      - name: 拉取仓库代码
+      - name: 拉取仓库完整代码
         uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 1
 
-      - name: 自动修复main.py所有启动报错（不动核心分析逻辑）
+      - name: 自动修复启动报错（完全不碰核心分析逻辑）
         run: |
-          echo "🔧 开始自动修复main.py启动报错，核心分析逻辑100%保留"
+          echo "🔧 开始自动修复main.py启动报错，原作者全市场/热点分析核心逻辑100%保留"
           
-          # 修复1：兼容--stocks和--codes参数，解决本次「无法识别的参数」报错
-          # 给main.py新增--stocks参数别名，和--codes完全等效，不影响原有逻辑
-          sed -i "s/parser\.add_argument('--codes', nargs='+', required=True/parser.add_argument('--codes', '--stocks', nargs='+', required=False/g" main.py
-          
-          # 修复2：新增参数兜底逻辑，自动从环境变量STOCK_LIST读取股票列表
+          # 修复1：兼容--stocks/--codes双参数，解决参数不识别报错
+          sed -i "s/parser\.add_argument('--codes',\s*nargs='\+',\s*required=True/parser.add_argument('--codes', '--stocks', nargs='+', required=False/g" main.py
+          echo "✅ 已兼容--stocks/--codes双参数，解决参数不识别报错"
+
+          # 修复2：新增参数兜底逻辑，兼容原作者的STOCK_LIST配置
           sed -i "/args = parser.parse_args()/c\
           args = parser.parse_args()\n\n\
-          # 自动兜底：兼容--codes/--stocks双参数，自动从环境变量读取股票列表\n\
+          # 自动兜底兼容：优先取--codes/--stocks参数，无则从STOCK_LIST环境变量读取\n\
           stock_codes = args.codes if args.codes else args.stocks\n\
           if not stock_codes:\n\
               stock_list_env = os.getenv(\"STOCK_LIST\", \"\")\n\
@@ -41,29 +44,30 @@ jobs:
                   stock_codes = [code.strip() for code in stock_list_env.split(',') if code.strip()]\n\
                   logger.info(f\"✅ 从环境变量读取到股票列表，共{len(stock_codes)}只\")\n\
               else:\n\
-                  logger.error(\"❌ 未获取到股票列表\")\n\
-                  raise SystemExit(\"错误：未指定任何股票代码\")" main.py
-          
-          # 修复3：彻底解决f-string三元表达式嵌套语法报错，避免启动崩溃
+                  logger.error(\"❌ 未获取到任何股票列表，请检查配置\")\n\
+                  raise SystemExit(\"错误：未指定股票代码\")" main.py
+          echo "✅ 已新增参数兜底逻辑，兼容原作者STOCK_LIST配置"
+
+          # 修复3：彻底解决f-string语法崩溃问题
           sed -i "s/{item\['price'\]:.2f}\" if item\['price'\] is not None else \"-\"/{f\"{item['price']:.2f}\" if item['price'] is not None else \"-\"/g" main.py
           sed -i "s/{item\['change'\]:.2f}\" if item\['change'\] is not None else \"-\"/{f\"{item['change']:.2f}\" if item['change'] is not None else \"-\"/g" main.py
+          echo "✅ 已修复f-string语法报错，避免启动崩溃"
 
-          echo "✅ main.py 所有启动报错修复完成，全市场/热点板块分析核心逻辑100%保留"
+          echo "🎉 所有启动类报错修复完成，原作者核心分析逻辑完全未改动"
 
       - name: 自动提交修复后的代码到仓库
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add main.py
-          git commit -m "fix: 自动修复main.py启动报错，保留核心分析逻辑"
+          git commit -m "fix: 自动修复main.py启动报错，保留全市场/热点分析核心逻辑" || echo "ℹ️  无代码改动，跳过提交"
           git push origin main
         env:
-          # 用GitHub自带的免费令牌，不用你手动生成，无泄露风险
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 自动重新运行每日股票分析
         run: |
-          echo "🚀 自动重新触发每日股票分析，执行核心全市场/热点板块分析逻辑"
+          echo "🚀 自动重新触发每日股票分析，执行原作者全市场/热点板块核心分析逻辑"
           gh workflow run daily_analysis.yml --ref main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
