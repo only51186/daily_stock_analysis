@@ -135,11 +135,12 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
 
-      # ====================== 新增核心步骤：上传分析结果文件 ======================
+      # ====================== 修复：使用英文文件名 ======================
       - name: 上传股票分析结果文件
         uses: actions/upload-artifact@v4
         with:
-          name: 每日股票分析结果-${{ github.run_id }}
+          # 关键修改：把中文名称改为英文，避免URL编码问题
+          name: daily-stock-analysis-result-${{ github.run_id }}
           # 覆盖常见的结果文件格式，根据main.py实际生成的文件调整
           path: |
             ./result*.csv
