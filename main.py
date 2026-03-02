@@ -6,6 +6,7 @@ import os
 import pandas as pd
 from datetime import datetime
 import random
+from tenacity import retry, stop_after_attempt, wait_exponential  # 导入重试依赖
 
 # ====================== 1. 日志配置 ======================
 def setup_logger():
@@ -33,9 +34,10 @@ def setup_logger():
 # 初始化日志
 logger, debug_logger = setup_logger()
 
-# ====================== 2. 股票数据获取 ======================
+# ====================== 2. 股票数据获取（添加重试） ======================
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=5))  # 重试3次，指数退避等待
 def get_stock_info(stock_code):
-    """获取股票基本信息和行情数据"""
+    """获取股票基本信息和行情数据（带重试机制）"""
     try:
         # 东方财富接口（兼容指数/板块/个股）
         url = f"https://push2.eastmoney.com/api/qt/stock/get?secid={get_secid(stock_code)}&fields=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f26,f27,f28,f30,f31,f32,f33,f34,f35,f36,f37,f38,f39,f40,f41,f42,f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65,f66,f67,f68,f69,f70,f71,f72,f73,f74,f75,f76,f77,f78,f79,f80,f81,f82,f83,f84,f85,f86,f87,f88,f89,f90"
@@ -43,6 +45,7 @@ def get_stock_info(stock_code):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
         response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()  # 触发HTTP错误（如404/500）
         data = response.json()
         
         if data['data']:
@@ -64,11 +67,11 @@ def get_stock_info(stock_code):
             debug_logger.debug(f"获取 {stock_code} 数据成功: {stock_data}")
             return stock_data
         else:
-            logger.warning(f"未获取到 {stock_code} 的数据")
+            logger.warning(f"未获取到 {stock_code} 的数据（接口返回空）")
             return None
     except Exception as e:
-        debug_logger.error(f"获取 {stock_code} 数据失败: {str(e)}")
-        return None
+        debug_logger.error(f"获取 {stock_code} 数据失败（重试中）: {str(e)}")
+        raise  # 触发重试
 
 def get_secid(stock_code):
     """转换为东方财富的secid格式"""
@@ -153,9 +156,9 @@ def analyze_stock(stock_data):
         debug_logger.error(f"分析 {stock_data['code']} 失败: {str(e)}")
         return None
 
-# ====================== 4. 可视化网页生成 ======================
+# ====================== 4. 可视化网页生成（兼容imgkit缺失） ======================
 def generate_visual_report(analysis_results, output_path="stock_analysis_report.html"):
-    """生成股票分析可视化网页"""
+    """生成股票分析可视化网页（兼容无wkhtmltopdf环境）"""
     if not analysis_results:
         logger.warning("无分析结果，跳过可视化网页生成")
         return
@@ -174,7 +177,7 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
         # 股票列表（用于表格）
         stock_table_data = df[['code', 'name', 'price', 'change', 'score', 'advice', 'trend']].to_dict('records')
         
-        # 2. HTML模板（使用ECharts CDN，无python包依赖）
+        # 2. HTML模板（修复f-string语法错误）
         html_content = f"""
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -338,8 +341,8 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
                     <tr>
                         <td>{item['code']}</td>
                         <td>{item['name']}</td>
-                        <td>{item['price']:.2f if item['price'] is not None else '-'}</td>
-                        <td style="color: {'red' if (item['change'] is not None and item['change'] > 0) else 'green'}">{item['change']:.2f if item['change'] is not None else '-'}</td>
+                        <td>{item['price']:.2f}" if item['price'] is not None else "-"</td>
+                        <td style="color: 'red' if (item['change'] is not None and item['change'] > 0) else 'green'">{item['change']:.2f}" if item['change'] is not None else "-"</td>
                         <td>{item['score']}</td>
                         <td class="{'buy' if item['advice']=='买入' else 'hold' if item['advice'] in ['增持','持有'] else 'sell'}">{item['advice']}</td>
                         <td>{item['trend']}</td>
@@ -356,14 +359,8 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
             // 1. 评分TOP10柱状图
             var scoreChart = echarts.init(document.getElementById('scoreChart'));
             scoreChart.setOption({{
-                title: {{ text: '' }},
-                tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'shadow' }} }},
-                grid: {{ left: '3%', right: '4%', bottom: '3%', containLabel: true }},
-                xAxis: {{
-                    type: 'category',
-                    data: {[item['name'] for item in top10_score]},
-                    axisLabel: {{ rotate: 30 }}
-                }},
+                title: {{ text: '股票评分TOP10', left: 'center' }},
+                xAxis: {{ type: 'category', data: {[item['name'] for item in top10_score]} }},
                 yAxis: {{ type: 'value', name: '评分' }},
                 series: [{{
                     name: '评分',
@@ -375,25 +372,20 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
                             return colorList[params.dataIndex];
                         }}
                     }}
-                }}]
+                }}],
+                tooltip: {{ trigger: 'axis' }}
             }});
 
             // 2. 涨跌幅折线图
             var changeChart = echarts.init(document.getElementById('changeChart'));
             changeChart.setOption({{
-                title: {{ text: '' }},
-                tooltip: {{ trigger: 'axis' }},
-                grid: {{ left: '3%', right: '4%', bottom: '3%', containLabel: true }},
-                xAxis: {{
-                    type: 'category',
-                    data: {[item['name'] for item in change_data[:20]]},
-                    axisLabel: {{ rotate: 45 }}
-                }},
+                title: {{ text: '个股涨跌幅分布', left: 'center' }},
+                xAxis: {{ type: 'category', data: {[item['name'] for item in change_data]} }},
                 yAxis: {{ type: 'value', name: '涨跌幅(%)' }},
                 series: [{{
-                    name: '涨跌幅',
+                    name: '涨跌幅(%)',
                     type: 'line',
-                    data: {[item['change'] for item in change_data[:20]]},
+                    data: {[item['change'] for item in change_data]},
                     markPoint: {{
                         data: [
                             {{type: 'max', name: '最大值'}},
@@ -403,18 +395,16 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
                     markLine: {{
                         data: [{{type: 'average', name: '平均值'}}]
                     }}
-                }}]
+                }}],
+                tooltip: {{ trigger: 'axis' }}
             }});
 
             // 3. 操作建议饼图
             var adviceChart = echarts.init(document.getElementById('adviceChart'));
             adviceChart.setOption({{
-                title: {{ text: '' }},
+                title: {{ text: '操作建议分布', left: 'center' }},
                 tooltip: {{ trigger: 'item' }},
-                legend: {{
-                    orient: 'vertical',
-                    left: 'left'
-                }},
+                legend: {{ orient: 'vertical', left: 'left' }},
                 series: [{{
                     name: '操作建议',
                     type: 'pie',
@@ -432,41 +422,35 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
 
             // 表格筛选功能
             $('#adviceFilter').change(function() {{
-                filterTable();
-            }});
-            
-            $('#scoreFilter').change(function() {{
-                filterTable();
-            }});
-            
-            function filterTable() {{
-                var advice = $('#adviceFilter').val();
-                var score = $('#scoreFilter').val();
-                
+                var advice = $(this).val();
                 $('#stockTable tbody tr').each(function() {{
-                    var rowAdvice = $(this).find('td:eq(5)').text();
-                    var rowScore = parseInt($(this).find('td:eq(4)').text());
-                    var show = true;
-                    
-                    // 筛选操作建议
-                    if (advice !== 'all' && rowAdvice !== advice) {{
-                        show = false;
+                    if (advice === 'all' || $(this).find('td:eq(5)').text() === advice) {{
+                        $(this).show();
+                    }} else {{
+                        $(this).hide();
                     }}
-                    
-                    // 筛选评分
-                    if (score === 'high' && rowScore < 80) {{
-                        show = false;
-                    }} else if (score === 'medium' && (rowScore < 40 || rowScore >= 80)) {{
-                        show = false;
-                    }} else if (score === 'low' && rowScore >= 40) {{
-                        show = false;
-                    }}
-                    
-                    $(this).toggle(show);
                 }});
-            }}
-            
-            // 响应窗口大小变化
+            }});
+
+            $('#scoreFilter').change(function() {{
+                var scoreType = $(this).val();
+                $('#stockTable tbody tr').each(function() {{
+                    var score = parseInt($(this).find('td:eq(4)').text());
+                    if (scoreType === 'all') {{
+                        $(this).show();
+                    }} else if (scoreType === 'high' && score >= 80) {{
+                        $(this).show();
+                    }} else if (scoreType === 'medium' && score >= 40 && score < 80) {{
+                        $(this).show();
+                    }} else if (scoreType === 'low' && score < 40) {{
+                        $(this).show();
+                    }} else {{
+                        $(this).hide();
+                    }}
+                }});
+            }});
+
+            // 自适应窗口大小
             window.addEventListener('resize', function() {{
                 scoreChart.resize();
                 changeChart.resize();
@@ -482,100 +466,98 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
-        logger.info(f"可视化分析报告已生成：{output_path}")
-        debug_logger.debug(f"可视化报告包含 {len(analysis_results)} 只股票数据")
+        logger.info(f"可视化报告已生成：{output_path}")
         
+        # 兼容处理imgkit（避免无wkhtmltopdf环境报错）
+        try:
+            import imgkit
+            img_path = output_path.replace('.html', '.png')
+            imgkit.from_file(output_path, img_path)
+            logger.info(f"报告图片已生成：{img_path}")
+        except ImportError:
+            logger.warning("未安装imgkit，跳过图片生成")
+        except Exception as e:
+            logger.warning(f"生成报告图片失败（无wkhtmltopdf）：{str(e)}")
+            
     except Exception as e:
         debug_logger.error(f"生成可视化报告失败: {str(e)}")
-        logger.error(f"可视化报告生成失败: {str(e)}")
+        logger.error(f"生成可视化报告失败: {str(e)}")
 
-# ====================== 5. 主程序 ======================
-def main():
-    """主程序入口"""
-    # 解析命令行参数
-    parser = argparse.ArgumentParser(description='每日股票分析程序')
-    parser.add_argument('--stocks', type=str, required=True, help='股票列表（逗号分隔）')
-    args = parser.parse_args()
-    
-    # 拆分股票列表
-    stock_codes = [code.strip() for code in args.stocks.split(',') if code.strip()]
-    logger.info(f"开始分析 {len(stock_codes)} 只股票: {stock_codes}")
-    
-    # 存储所有分析结果
-    all_analysis_results = []
-    
-    # 逐个分析股票
-    for idx, stock_code in enumerate(stock_codes):
-        logger.info(f"正在分析第 {idx+1}/{len(stock_codes)} 只股票: {stock_code}")
-        
-        # 获取股票数据
-        stock_data = get_stock_info(stock_code)
-        if not stock_data:
-            continue
-        
-        # 分析股票
-        analysis_result = analyze_stock(stock_data)
-        if analysis_result:
-            all_analysis_results.append(analysis_result)
-        
-        # 避免请求过快
-        if idx % 10 == 0 and idx > 0:
-            import time
-            time.sleep(1)
-    
-    # 保存分析结果到CSV
-    if all_analysis_results:
-        df = pd.DataFrame(all_analysis_results)
-        csv_path = f"stock_analysis_result_{datetime.now().strftime('%Y%m%d')}.csv"
-        df.to_csv(csv_path, index=False, encoding='utf-8-sig')
-        logger.info(f"分析结果已保存到CSV: {csv_path}")
-        
-        # 生成可视化网页
-        generate_visual_report(all_analysis_results)
-    else:
-        logger.warning("未生成任何分析结果")
-    
-    # 发送微信通知（如果配置了webhook）
-    if os.getenv('WECHAT_WEBHOOK_URL'):
-        try:
-            send_wechat_notification(all_analysis_results)
-        except Exception as e:
-            logger.error(f"发送微信通知失败: {str(e)}")
-    
-    logger.info("程序执行完成")
-
+# ====================== 5. 微信通知（示例） ======================
 def send_wechat_notification(analysis_results):
-    """发送微信通知"""
-    if not analysis_results:
-        return
-    
-    # 筛选高评分股票（≥80）
-    high_score_stocks = [r for r in analysis_results if r['score'] >= 80]
-    
-    # 组装消息
-    msg = f"""
+    """发送微信通知（需对接企业微信/公众号API）"""
+    try:
+        # 这里仅为示例，需替换为实际的微信通知API
+        if not analysis_results:
+            return
+        
+        # 整理通知内容
+        top_buy = [r for r in analysis_results if r['advice'] == '买入'][:5]
+        content = f"""
 【每日股票分析报告】
 分析时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 共分析股票：{len(analysis_results)} 只
-高评分股票（≥80分）：{len(high_score_stocks)} 只
-
-高评分股票列表：
-{chr(10).join([f"• {r['name']}({r['code']}): 评分{r['score']} 建议{r['advice']}" for r in high_score_stocks[:10]])}
-    """.strip()
-    
-    # 发送到企业微信/webhook
-    requests.post(
-        os.getenv('WECHAT_WEBHOOK_URL'),
-        json={"msgtype": "text", "text": {"content": msg}},
-        timeout=10
-    )
-    logger.info("微信通知发送成功")
-
-# ====================== 6. 入口执行 ======================
-if __name__ == '__main__':
-    try:
-        main()
+买入建议：{len(top_buy)} 只
+TOP3买入标的：
+{chr(10).join([f"• {r['name']}({r['code']}) 评分{r['score']}" for r in top_buy[:3]])}
+        """
+        
+        # 示例：调用微信通知API（需替换为实际接口）
+        # requests.post("https://your-wechat-api.com/send", json={"content": content})
+        logger.info(f"微信通知内容已生成（示例）：{content}")
+        
     except Exception as e:
-        logger.error(f"程序执行出错: {str(e)}")
-        debug_logger.exception("程序执行异常详情:")
-        raise
+        debug_logger.error(f"发送微信通知失败: {str(e)}")
+        logger.error(f"发送微信通知失败: {str(e)}")
+
+# ====================== 6. 主函数 ======================
+def main(stock_codes):
+    """主函数：获取数据 → 分析 → 生成报告 → 发送通知"""
+    logger.info("===== 开始每日股票分析 =====")
+    
+    # 1. 获取股票数据
+    stock_data_list = []
+    for code in stock_codes:
+        try:
+            stock_data = get_stock_info(code)
+            if stock_data:
+                stock_data_list.append(stock_data)
+            # 随机延迟，避免接口限流
+            random.sleep(random.uniform(0.5, 1.5))
+        except Exception as e:
+            logger.error(f"处理股票 {code} 失败: {str(e)}")
+    
+    if not stock_data_list:
+        logger.error("未获取到任何股票数据，分析终止")
+        return
+    
+    # 2. 分析股票
+    analysis_results = []
+    for stock_data in stock_data_list:
+        analysis_result = analyze_stock(stock_data)
+        if analysis_result:
+            analysis_results.append(analysis_result)
+    
+    # 3. 保存分析结果到CSV
+    if analysis_results:
+        csv_path = f"stock_analysis_result_{datetime.now().strftime('%Y%m%d')}.csv"
+        df = pd.DataFrame(analysis_results)
+        df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+        logger.info(f"分析结果已保存到CSV：{csv_path}")
+        
+        # 4. 生成可视化报告
+        generate_visual_report(analysis_results)
+        
+        # 5. 发送微信通知
+        send_wechat_notification(analysis_results)
+    
+    logger.info("===== 每日股票分析完成 =====")
+
+# ====================== 7. 命令行入口 ======================
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='每日股票分析工具')
+    parser.add_argument('--codes', nargs='+', required=True, help='股票代码列表，如：600000 000001 300059')
+    args = parser.parse_args()
+    
+    # 执行主函数
+    main(args.codes)
