@@ -17,12 +17,12 @@ pytdx>=1.72                 # Priority 2: 通达信行情服务器
 baostock>=0.8.0             # Priority 3: 证券宝数据
 yfinance>=0.2.0             # Priority 4: Yahoo Finance (Fallback)
 
-#飞书
-lark-oapi>=1.0.0             # 飞书API
+# 飞书
+lark-oapi>=1.0.0            # 飞书API
 
 # 数据处理
-pandas>=2.0.0               # 数据分析
-numpy>=1.24.0               # 数值计算
+pandas>=2.0.0               # 数据分析（适配Python 3.10）
+numpy>=1.24.0               # 数值计算（适配Python 3.10）
 json-repair>=0.55.1         # JSON 修复
 
 # AI 分析
@@ -36,16 +36,16 @@ google-search-results>=2.4.0  # SerpAPI（每月 100 次免费）
 # 网络请求
 requests>=2.31.0            # HTTP 请求
 markdown2>=2.4.0            # Markdown 转 HTML
-imgkit>=1.2.0              # Markdown 转图片（需安装 wkhtmltopdf）
+imgkit>=1.2.0               # Markdown 转图片（需安装 wkhtmltopdf）
 fake-useragent>=1.4.0       # 随机 User-Agent 防封禁
 httpx[socks]                # HTTP 客户端 + SOCKS 代理支持（OpenAI 可选依赖）
-dingtalk-stream >= 0.24.3    # 钉钉 Stream SDK
+dingtalk-stream>=0.24.3     # 钉钉 Stream SDK
 
 # 数据库
 # SQLite 是 Python 内置，无需额外安装
 
 # Discord 机器人
-discord.py>=2.0.0              # Discord 机器人开发库
+discord.py>=2.0.0           # Discord 机器人开发库
 
 # Web Content Extraction
 newspaper3k>=0.2.8          # Article extraction
@@ -56,5 +56,5 @@ fastapi>=0.109.0            # 现代 Python Web 框架
 uvicorn[standard]>=0.27.0   # ASGI 服务器
 python-multipart>=0.0.6     # FastAPI File/Form upload support
 
-# 新增：可视化网页生成依赖
-echarts-python>=0.1.8       # ECharts 可视化生成
+# 可视化网页生成（已移除echarts-python，改用前端CDN实现，无需Python包依赖）
+# 注：可视化功能通过HTML引入ECharts CDN实现，无需安装python包
