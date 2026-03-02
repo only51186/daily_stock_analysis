@@ -168,8 +168,8 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
         table_rows = ""
         for item in stock_table_data:
             # 单独处理每一行的数值格式化
-            price_text = f"{item['price']:.2f}" if item['price'] is not None else "-"
-            change_text = f"{item['change']:.2f}" if item['change'] is not None else "-"
+            price_text = f"{f"{item['price']:.2f}" if item['price'] is not None else "-"
+            change_text = f"{f"{item['change']:.2f}" if item['change'] is not None else "-"
             change_color = "red" if (item['change'] is not None and item['change'] > 0) else "green"
             advice_class = "buy" if item['advice'] == '买入' else "hold" if item['advice'] in ['增持','持有'] else "sell"
             
@@ -555,7 +555,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='每日股票分析工具')
     # 核心修复：把required=True改成False，不再强制必填，增加兜底逻辑
     parser.add_argument('--codes', nargs='+', required=False, help='股票代码列表，如：600000 000001')
-    args = parser.parse_args()
+args = parser.parse_args()
+
+# 自动兜底：兼容--codes/--stocks双参数，自动从环境变量读取股票列表
+stock_codes = args.codes if args.codes else args.stocks
+if not stock_codes:
+    stock_list_env = os.getenv("STOCK_LIST", "")
+    if stock_list_env:
+        stock_codes = [code.strip() for code in stock_list_env.split(',') if code.strip()]
+        logger.info(f"✅ 从环境变量读取到股票列表，共{len(stock_codes)}只")
+    else:
+        logger.error("❌ 未获取到股票列表")
+        raise SystemExit("错误：未指定任何股票代码")
 
     # 兜底逻辑1：如果命令行没传--codes，自动从环境变量STOCK_LIST读取
     stock_codes = args.codes
