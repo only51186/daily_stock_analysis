@@ -91,8 +91,8 @@ def analyze_stock(stock_data):
         # 基础评分（0-100）
         score = 50
         
-        # 涨跌幅评分（±30分）
-        change = stock_data['change']
+        # 涨跌幅评分（±30分）- 增加None值判断
+        change = stock_data['change'] if stock_data['change'] is not None else 0
         if change > 5:
             score += 30
         elif change > 2:
@@ -106,8 +106,8 @@ def analyze_stock(stock_data):
         elif change < 0:
             score -= 5
         
-        # 成交量评分（±10分）
-        volume = stock_data['volume']
+        # 成交量评分（±10分）- 增加None值判断
+        volume = stock_data['volume'] if stock_data['volume'] is not None else 0
         if volume > 1e8:  # 成交量>1亿
             score += 10
         elif volume < 1e7:  # 成交量<1000万
@@ -153,7 +153,7 @@ def analyze_stock(stock_data):
         debug_logger.error(f"分析 {stock_data['code']} 失败: {str(e)}")
         return None
 
-# ====================== 4. 可视化网页生成（仅修复：移除echarts-python依赖，改用CDN） ======================
+# ====================== 4. 可视化网页生成 ======================
 def generate_visual_report(analysis_results, output_path="stock_analysis_report.html"):
     """生成股票分析可视化网页"""
     if not analysis_results:
@@ -174,7 +174,7 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
         # 股票列表（用于表格）
         stock_table_data = df[['code', 'name', 'price', 'change', 'score', 'advice', 'trend']].to_dict('records')
         
-        # 2. HTML模板（仅修改：使用ECharts CDN，无python包依赖）
+        # 2. HTML模板（使用ECharts CDN，无python包依赖）
         html_content = f"""
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -338,8 +338,8 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
                     <tr>
                         <td>{item['code']}</td>
                         <td>{item['name']}</td>
-                        <td>{item['price']:.2f}</td>
-                        <td style="color: {'red' if item['change'] > 0 else 'green'}">{item['change']:.2f}</td>
+                        <td>{item['price']:.2f if item['price'] is not None else '-'}</td>
+                        <td style="color: {'red' if (item['change'] is not None and item['change'] > 0) else 'green'}">{item['change']:.2f if item['change'] is not None else '-'}</td>
                         <td>{item['score']}</td>
                         <td class="{'buy' if item['advice']=='买入' else 'hold' if item['advice'] in ['增持','持有'] else 'sell'}">{item['advice']}</td>
                         <td>{item['trend']}</td>
