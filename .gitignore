@@ -77,3 +77,15 @@ CLAUDE.md
 static/
 /apps/dsa-desktop/dist/
 /apps/dsa-desktop/node_modules/
+
+# GitHub 部署相关
+data_cache/
+cache/
+*.log
+*.bak
+*.tmp
+
+# 敏感配置文件
+config/secrets.py
+secrets.py
+*_secrets.py
