@@ -128,6 +128,28 @@ jobs:
           pip install -r requirements.txt
           # 关键修改：1. 参数名改为--stocks 2. 增加空格 3. 处理中文参数名兼容
           python main.py --stocks "${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
+          # 新增：列出生成的文件，方便排查
+          echo "生成的文件列表："
+          ls -la
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+
+      # ====================== 新增核心步骤：上传分析结果文件 ======================
+      - name: 上传股票分析结果文件
+        uses: actions/upload-artifact@v4
+        with:
+          name: 每日股票分析结果-${{ github.run_id }}
+          # 覆盖常见的结果文件格式，根据main.py实际生成的文件调整
+          path: |
+            ./result*.csv
+            ./analysis*.csv
+            ./report*.csv
+            ./stock_*.csv
+            ./output*.txt
+            ./logs/*.log
+            ./*.xlsx
+            ./*.json
+            ./*.png
+          # 即使没有生成文件也不报错（兜底）
+          if-no-files-found: warn
