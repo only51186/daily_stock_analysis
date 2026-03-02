@@ -6,23 +6,20 @@ import os
 import pandas as pd
 from datetime import datetime
 import random
-from tenacity import retry, stop_after_attempt, wait_exponential  # 导入重试依赖
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 # ====================== 1. 日志配置 ======================
 def setup_logger():
     """配置日志系统"""
-    # 创建logs目录
     if not os.path.exists('logs'):
         os.makedirs('logs')
     
-    # 主日志
     main_logger = logging.getLogger('stock_analysis')
     main_logger.setLevel(logging.INFO)
     main_handler = logging.FileHandler(f'logs/stock_analysis_{datetime.now().strftime("%Y%m%d")}.log', encoding='utf-8')
     main_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     main_logger.addHandler(main_handler)
     
-    # 调试日志
     debug_logger = logging.getLogger('stock_analysis_debug')
     debug_logger.setLevel(logging.DEBUG)
     debug_handler = logging.FileHandler(f'logs/stock_analysis_debug_{datetime.now().strftime("%Y%m%d")}.log', encoding='utf-8')
@@ -31,58 +28,56 @@ def setup_logger():
     
     return main_logger, debug_logger
 
-# 初始化日志
 logger, debug_logger = setup_logger()
 
-# ====================== 2. 股票数据获取（添加重试） ======================
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=5))  # 重试3次，指数退避等待
+# ====================== 2. 股票数据获取（带重试防网络波动） ======================
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=5))
 def get_stock_info(stock_code):
-    """获取股票基本信息和行情数据（带重试机制）"""
+    """获取股票基本信息和行情数据"""
     try:
-        # 东方财富接口（兼容指数/板块/个股）
         url = f"https://push2.eastmoney.com/api/qt/stock/get?secid={get_secid(stock_code)}&fields=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f26,f27,f28,f30,f31,f32,f33,f34,f35,f36,f37,f38,f39,f40,f41,f42,f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65,f66,f67,f68,f69,f70,f71,f72,f73,f74,f75,f76,f77,f78,f79,f80,f81,f82,f83,f84,f85,f86,f87,f88,f89,f90"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
         response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()  # 触发HTTP错误（如404/500）
+        response.raise_for_status()
         data = response.json()
         
         if data['data']:
             stock_data = {
                 'code': stock_code,
                 'name': data['data']['f14'],
-                'price': data['data']['f2'],          # 当前价
-                'change': data['data']['f3'],        # 涨跌幅(%)
-                'change_amount': data['data']['f4'], # 涨跌额
-                'volume': data['data']['f5'],        # 成交量
-                'turnover': data['data']['f6'],      # 成交额
-                'open': data['data']['f7'],          # 开盘价
-                'high': data['data']['f8'],          # 最高价
-                'low': data['data']['f9'],           # 最低价
-                'prev_close': data['data']['f10'],   # 昨收价
-                'market_cap': data['data']['f20'],   # 总市值
-                'circulating_cap': data['data']['f21'] # 流通市值
+                'price': data['data']['f2'],
+                'change': data['data']['f3'],
+                'change_amount': data['data']['f4'],
+                'volume': data['data']['f5'],
+                'turnover': data['data']['f6'],
+                'open': data['data']['f7'],
+                'high': data['data']['f8'],
+                'low': data['data']['f9'],
+                'prev_close': data['data']['f10'],
+                'market_cap': data['data']['f20'],
+                'circulating_cap': data['data']['f21']
             }
             debug_logger.debug(f"获取 {stock_code} 数据成功: {stock_data}")
             return stock_data
         else:
-            logger.warning(f"未获取到 {stock_code} 的数据（接口返回空）")
+            logger.warning(f"未获取到 {stock_code} 的数据")
             return None
     except Exception as e:
-        debug_logger.error(f"获取 {stock_code} 数据失败（重试中）: {str(e)}")
-        raise  # 触发重试
+        debug_logger.error(f"获取 {stock_code} 数据失败: {str(e)}")
+        raise
 
 def get_secid(stock_code):
     """转换为东方财富的secid格式"""
     if stock_code.startswith('60') or stock_code.startswith('90'):
-        return f"1.{stock_code}"  # 沪市
+        return f"1.{stock_code}"
     elif stock_code.startswith('00') or stock_code.startswith('30'):
-        return f"0.{stock_code}"  # 深市
+        return f"0.{stock_code}"
     elif stock_code.startswith('8'):
-        return f"1.{stock_code}"  # 北交所
+        return f"1.{stock_code}"
     else:
-        return f"1.{stock_code}"  # 指数/板块默认
+        return f"1.{stock_code}"
 
 # ====================== 3. 股票分析逻辑 ======================
 def analyze_stock(stock_data):
@@ -91,10 +86,9 @@ def analyze_stock(stock_data):
         return None
     
     try:
-        # 基础评分（0-100）
         score = 50
         
-        # 涨跌幅评分（±30分）- 增加None值判断
+        # 涨跌幅评分
         change = stock_data['change'] if stock_data['change'] is not None else 0
         if change > 5:
             score += 30
@@ -109,17 +103,16 @@ def analyze_stock(stock_data):
         elif change < 0:
             score -= 5
         
-        # 成交量评分（±10分）- 增加None值判断
+        # 成交量评分
         volume = stock_data['volume'] if stock_data['volume'] is not None else 0
-        if volume > 1e8:  # 成交量>1亿
+        if volume > 1e8:
             score += 10
-        elif volume < 1e7:  # 成交量<1000万
+        elif volume < 1e7:
             score -= 10
         
-        # 限制评分范围0-100
         score = max(0, min(100, score))
         
-        # 生成操作建议
+        # 操作建议
         if score >= 80:
             advice = "买入"
             trend = "强势上涨"
@@ -136,7 +129,6 @@ def analyze_stock(stock_data):
             advice = "卖出"
             trend = "弱势下跌"
         
-        # 组装分析结果
         analysis_result = {
             'code': stock_data['code'],
             'name': stock_data['name'],
@@ -156,35 +148,29 @@ def analyze_stock(stock_data):
         debug_logger.error(f"分析 {stock_data['code']} 失败: {str(e)}")
         return None
 
-# ====================== 4. 可视化网页生成（兼容imgkit缺失） ======================
+# ====================== 4. 可视化网页生成（彻底修复语法错误） ======================
 def generate_visual_report(analysis_results, output_path="stock_analysis_report.html"):
-    """生成股票分析可视化网页（兼容无wkhtmltopdf环境）"""
+    """生成股票分析可视化网页"""
     if not analysis_results:
         logger.warning("无分析结果，跳过可视化网页生成")
         return
     
     try:
-        # 整理数据
         df = pd.DataFrame(analysis_results)
         
-        # 1. 准备图表数据
-        # 评分TOP10
+        # 图表数据准备
         top10_score = df.nlargest(10, 'score')[['name', 'score']].to_dict('records')
-        # 操作建议统计
         advice_count = df['advice'].value_counts().to_dict()
-        # 涨跌幅数据（过滤无效值）
         change_data = df[df['change'].notna()][['name', 'change']].to_dict('records')
-        # 股票列表（用于表格）
         stock_table_data = df[['code', 'name', 'price', 'change', 'score', 'advice', 'trend']].to_dict('records')
         
-        # 2. HTML模板（修复f-string语法错误）
+        # HTML模板（彻底修复f-string语法错误，无任何无效字符）
         html_content = f"""
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <title>每日股票分析报告 - {datetime.now().strftime('%Y-%m-%d')}</title>
-    <!-- 引入ECharts和jQuery CDN（无需本地安装） -->
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
     <style>
@@ -276,7 +262,6 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
     <div class="container">
         <h1>每日股票分析报告 ({datetime.now().strftime('%Y-%m-%d')})</h1>
         
-        <!-- 汇总信息 -->
         <div class="summary">
             <h3>📊 分析汇总</h3>
             <p>📈 共分析股票：<strong>{len(df)}</strong> 只</p>
@@ -285,25 +270,21 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
             <p>📊 平均涨跌幅：<strong>{df[df['change'].notna()]['change'].mean():.2f}%</strong></p>
         </div>
 
-        <!-- 评分TOP10柱状图 -->
         <div class="chart-section">
             <h3>🏆 股票评分TOP10</h3>
             <div id="scoreChart" class="chart"></div>
         </div>
         
-        <!-- 涨跌幅折线图 -->
         <div class="chart-section">
             <h3>📉 个股涨跌幅分布</h3>
             <div id="changeChart" class="chart"></div>
         </div>
         
-        <!-- 操作建议饼图 -->
         <div class="chart-section">
             <h3>🎯 操作建议分布</h3>
             <div id="adviceChart" class="chart"></div>
         </div>
         
-        <!-- 个股详情表格 -->
         <div class="chart-section">
             <h3>📋 个股详情</h3>
             <div class="filter-box">
@@ -341,8 +322,8 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
                     <tr>
                         <td>{item['code']}</td>
                         <td>{item['name']}</td>
-                        <td>{item['price']:.2f}" if item['price'] is not None else "-"</td>
-                        <td style="color: 'red' if (item['change'] is not None and item['change'] > 0) else 'green'">{item['change']:.2f}" if item['change'] is not None else "-"</td>
+                        <td>{f"{item['price']:.2f}" if item['price'] is not None else "-"}</td>
+                        <td style="color: {'red' if (item['change'] is not None and item['change'] > 0) else 'green'}">{f"{item['change']:.2f}" if item['change'] is not None else "-"}</td>
                         <td>{item['score']}</td>
                         <td class="{'buy' if item['advice']=='买入' else 'hold' if item['advice'] in ['增持','持有'] else 'sell'}">{item['advice']}</td>
                         <td>{item['trend']}</td>
@@ -354,9 +335,8 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
     </div>
 
     <script>
-        // 初始化图表
         $(document).ready(function() {{
-            // 1. 评分TOP10柱状图
+            // 评分TOP10柱状图
             var scoreChart = echarts.init(document.getElementById('scoreChart'));
             scoreChart.setOption({{
                 title: {{ text: '股票评分TOP10', left: 'center' }},
@@ -376,7 +356,7 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
                 tooltip: {{ trigger: 'axis' }}
             }});
 
-            // 2. 涨跌幅折线图
+            // 涨跌幅折线图
             var changeChart = echarts.init(document.getElementById('changeChart'));
             changeChart.setOption({{
                 title: {{ text: '个股涨跌幅分布', left: 'center' }},
@@ -399,7 +379,7 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
                 tooltip: {{ trigger: 'axis' }}
             }});
 
-            // 3. 操作建议饼图
+            // 操作建议饼图
             var adviceChart = echarts.init(document.getElementById('adviceChart'));
             adviceChart.setOption({{
                 title: {{ text: '操作建议分布', left: 'center' }},
@@ -450,7 +430,7 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
                 }});
             }});
 
-            // 自适应窗口大小
+            // 自适应窗口
             window.addEventListener('resize', function() {{
                 scoreChart.resize();
                 changeChart.resize();
@@ -468,7 +448,7 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
         
         logger.info(f"可视化报告已生成：{output_path}")
         
-        # 兼容处理imgkit（避免无wkhtmltopdf环境报错）
+        # 兼容imgkit，无环境不报错
         try:
             import imgkit
             img_path = output_path.replace('.html', '.png')
@@ -477,21 +457,19 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
         except ImportError:
             logger.warning("未安装imgkit，跳过图片生成")
         except Exception as e:
-            logger.warning(f"生成报告图片失败（无wkhtmltopdf）：{str(e)}")
+            logger.warning(f"生成报告图片失败：{str(e)}")
             
     except Exception as e:
         debug_logger.error(f"生成可视化报告失败: {str(e)}")
         logger.error(f"生成可视化报告失败: {str(e)}")
 
-# ====================== 5. 微信通知（示例） ======================
+# ====================== 5. 微信通知模块 ======================
 def send_wechat_notification(analysis_results):
-    """发送微信通知（需对接企业微信/公众号API）"""
+    """发送微信通知（示例，可对接企业微信API）"""
     try:
-        # 这里仅为示例，需替换为实际的微信通知API
         if not analysis_results:
             return
         
-        # 整理通知内容
         top_buy = [r for r in analysis_results if r['advice'] == '买入'][:5]
         content = f"""
 【每日股票分析报告】
@@ -501,10 +479,7 @@ def send_wechat_notification(analysis_results):
 TOP3买入标的：
 {chr(10).join([f"• {r['name']}({r['code']}) 评分{r['score']}" for r in top_buy[:3]])}
         """
-        
-        # 示例：调用微信通知API（需替换为实际接口）
-        # requests.post("https://your-wechat-api.com/send", json={"content": content})
-        logger.info(f"微信通知内容已生成（示例）：{content}")
+        logger.info(f"微信通知内容已生成：{content}")
         
     except Exception as e:
         debug_logger.error(f"发送微信通知失败: {str(e)}")
@@ -515,14 +490,13 @@ def main(stock_codes):
     """主函数：获取数据 → 分析 → 生成报告 → 发送通知"""
     logger.info("===== 开始每日股票分析 =====")
     
-    # 1. 获取股票数据
+    # 获取股票数据
     stock_data_list = []
     for code in stock_codes:
         try:
             stock_data = get_stock_info(code)
             if stock_data:
                 stock_data_list.append(stock_data)
-            # 随机延迟，避免接口限流
             random.sleep(random.uniform(0.5, 1.5))
         except Exception as e:
             logger.error(f"处理股票 {code} 失败: {str(e)}")
@@ -531,24 +505,21 @@ def main(stock_codes):
         logger.error("未获取到任何股票数据，分析终止")
         return
     
-    # 2. 分析股票
+    # 分析股票
     analysis_results = []
     for stock_data in stock_data_list:
         analysis_result = analyze_stock(stock_data)
         if analysis_result:
             analysis_results.append(analysis_result)
     
-    # 3. 保存分析结果到CSV
+    # 输出结果
     if analysis_results:
         csv_path = f"stock_analysis_result_{datetime.now().strftime('%Y%m%d')}.csv"
         df = pd.DataFrame(analysis_results)
         df.to_csv(csv_path, index=False, encoding='utf-8-sig')
         logger.info(f"分析结果已保存到CSV：{csv_path}")
         
-        # 4. 生成可视化报告
         generate_visual_report(analysis_results)
-        
-        # 5. 发送微信通知
         send_wechat_notification(analysis_results)
     
     logger.info("===== 每日股票分析完成 =====")
@@ -556,8 +527,7 @@ def main(stock_codes):
 # ====================== 7. 命令行入口 ======================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='每日股票分析工具')
-    parser.add_argument('--codes', nargs='+', required=True, help='股票代码列表，如：600000 000001 300059')
+    parser.add_argument('--codes', nargs='+', required=True, help='股票代码列表，如：600000 000001')
     args = parser.parse_args()
     
-    # 执行主函数
     main(args.codes)
