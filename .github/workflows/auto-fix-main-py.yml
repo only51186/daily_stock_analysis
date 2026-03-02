@@ -4,82 +4,57 @@ on:
   workflow_run:
     workflows: ["每日股票分析"]
     types: [completed]
-  # 触发条件2：手动触发修复
+  # 触发条件2：支持手动触发修复
   workflow_dispatch:
 
-# 全量最小化权限配置，彻底解决403权限报错
+# 仅保留GitHub Actions官方支持的最小化有效权限，彻底解决无效文件报错
 permissions:
   contents: write
   actions: read
-  workflows: write
 
 jobs:
-  auto-fix-and-re-run:
+  auto-fix-main-py:
     runs-on: ubuntu-latest
     # 触发规则：手动触发 或 原每日股票分析任务失败时触发
     if: ${{ github.event.workflow_run.conclusion == 'failure' || github.event_name == 'workflow_dispatch' }}
     steps:
-      - name: 拉取仓库代码
+      - name: 拉取仓库完整代码
         uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: 自动修复main.py启动报错（完全不碰核心分析逻辑）
         run: |
-          echo "🔧 开始自动修复main.py启动报错，原作者核心分析逻辑100%保留"
+          echo "🔧 开始自动修复main.py启动报错，原作者全市场/热点分析核心逻辑100%保留"
 
-          # ===================== 修复1：兼容--stocks/--codes双参数，解决参数不识别报错 =====================
+          # 修复1：兼容--stocks/--codes双参数，解决参数不识别报错，把必填改为非必填
           sed -i "s/parser\.add_argument('--codes',\s*nargs='\+',\s*required=True/parser.add_argument('--codes', '--stocks', nargs='+', required=False/g" main.py
           echo "✅ 已兼容--stocks/--codes双参数，解决参数不识别报错"
 
-          # ===================== 修复2：新增参数兜底逻辑（稳定版，无换行转义问题） =====================
-          # 先把原有的参数解析行替换成标记
-          sed -i "s/args = parser.parse_args()/### AUTO_FIX_REPLACE_MARKER ###/g" main.py
-          
-          # 写入带兜底逻辑的完整代码块
-          cat > fix_block.py << 'EOF'
-          args = parser.parse_args()
-
-          # 自动兜底兼容：优先取--codes/--stocks参数，无则从STOCK_LIST环境变量读取
-          stock_codes = args.codes if args.codes else args.stocks
-          if not stock_codes:
-              stock_list_env = os.getenv("STOCK_LIST", "")
-              if stock_list_env:
-                  stock_codes = [code.strip() for code in stock_list_env.split(',') if code.strip()]
-                  logger.info(f"✅ 从环境变量读取到股票列表，共{len(stock_codes)}只")
-              else:
-                  logger.error("❌ 未获取到任何股票列表，请检查配置")
-                  raise SystemExit("错误：未指定股票代码")
-          EOF
-          
-          # 把标记替换成完整的修复代码块
-          sed -i '/### AUTO_FIX_REPLACE_MARKER ###/r fix_block.py' main.py
-          sed -i '/### AUTO_FIX_REPLACE_MARKER ###/d' main.py
-          rm -f fix_block.py
+          # 修复2：单行写入参数兜底逻辑，无换行转义问题，100%兼容ubuntu环境
+          sed -i "s/args = parser.parse_args()/args = parser.parse_args()\nstock_codes = args.codes if args.codes else args.stocks\nif not stock_codes:\n    stock_list_env = os.getenv(\"STOCK_LIST\", \"\")\n    if stock_list_env:\n        stock_codes = [code.strip() for code in stock_list_env.split(',') if code.strip()]\n        logger.info(f\"✅ 从环境变量读取到股票列表，共{len(stock_codes)}只\")\n    else:\n        logger.error(\"❌ 未获取到任何股票列表，请检查配置\")\n        raise SystemExit(\"错误：未指定股票代码\")/g" main.py
           echo "✅ 已新增参数兜底逻辑，兼容原作者STOCK_LIST配置"
 
-          # ===================== 修复3：彻底解决f-string语法崩溃问题 =====================
+          # 修复3：彻底解决f-string语法崩溃问题
           sed -i "s/{item\['price'\]:.2f}\" if item\['price'\] is not None else \"-\"/{f\"{item['price']:.2f}\" if item['price'] is not None else \"-\"/g" main.py
           sed -i "s/{item\['change'\]:.2f}\" if item\['change'\] is not None else \"-\"/{f\"{item['change']:.2f}\" if item['change'] is not None else \"-\"/g" main.py
           echo "✅ 已修复f-string语法报错，避免启动崩溃"
 
           echo "🎉 所有启动类报错修复完成，原作者核心分析逻辑完全未改动"
 
-      - name: 提交修复后的代码到仓库
+      - name: 自动提交修复后的代码到仓库
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add main.py
-          # 容错：无代码改动也不会报错退出
+          # 容错处理：无代码改动也不会报错退出
           git diff --quiet && git diff --staged --quiet || git commit -m "fix: 自动修复main.py启动报错，保留全市场/热点分析核心逻辑"
           git push origin main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 自动重新运行每日股票分析
+      - name: 修复完成提示
         run: |
-          echo "🚀 自动重新触发每日股票分析，执行原作者核心分析逻辑"
-          gh workflow run daily_analysis.yml --ref main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "✅ main.py修复已完成并提交到仓库！"
+          echo "👉 请手动进入Actions页面，运行「每日股票分析」主任务即可正常执行"
