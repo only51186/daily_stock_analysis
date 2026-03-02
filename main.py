@@ -153,7 +153,7 @@ def analyze_stock(stock_data):
         debug_logger.error(f"分析 {stock_data['code']} 失败: {str(e)}")
         return None
 
-# ====================== 4. 可视化网页生成 ======================
+# ====================== 4. 可视化网页生成（仅修复：移除echarts-python依赖，改用CDN） ======================
 def generate_visual_report(analysis_results, output_path="stock_analysis_report.html"):
     """生成股票分析可视化网页"""
     if not analysis_results:
@@ -174,14 +174,14 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
         # 股票列表（用于表格）
         stock_table_data = df[['code', 'name', 'price', 'change', 'score', 'advice', 'trend']].to_dict('records')
         
-        # 2. HTML模板（集成ECharts可视化）
+        # 2. HTML模板（仅修改：使用ECharts CDN，无python包依赖）
         html_content = f"""
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <title>每日股票分析报告 - {datetime.now().strftime('%Y-%m-%d')}</title>
-    <!-- 引入ECharts和jQuery -->
+    <!-- 引入ECharts和jQuery CDN（无需本地安装） -->
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
     <style>
@@ -386,7 +386,7 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
                 grid: {{ left: '3%', right: '4%', bottom: '3%', containLabel: true }},
                 xAxis: {{
                     type: 'category',
-                    data: {[item['name'] for item in change_data[:20]]},  // 只显示前20个
+                    data: {[item['name'] for item in change_data[:20]]},
                     axisLabel: {{ rotate: 45 }}
                 }},
                 yAxis: {{ type: 'value', name: '涨跌幅(%)' }},
