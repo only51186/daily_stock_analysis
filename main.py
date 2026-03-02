@@ -148,7 +148,7 @@ def analyze_stock(stock_data):
         debug_logger.error(f"分析 {stock_data['code']} 失败: {str(e)}")
         return None
 
-# ====================== 4. 可视化网页生成（彻底修复语法错误） ======================
+# ====================== 4. 可视化网页生成（彻底修复f-string语法错误） ======================
 def generate_visual_report(analysis_results, output_path="stock_analysis_report.html"):
     """生成股票分析可视化网页"""
     if not analysis_results:
@@ -163,14 +163,50 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
         advice_count = df['advice'].value_counts().to_dict()
         change_data = df[df['change'].notna()][['name', 'change']].to_dict('records')
         stock_table_data = df[['code', 'name', 'price', 'change', 'score', 'advice', 'trend']].to_dict('records')
+
+        # ====================== 核心修复：提前单独生成表格HTML，彻底规避f-string嵌套报错 ======================
+        table_rows = ""
+        for item in stock_table_data:
+            # 单独处理每一行的数值格式化，完全不嵌套在大f-string里
+            price_text = f"{item['price']:.2f}" if item['price'] is not None else "-"
+            change_text = f"{item['change']:.2f}" if item['change'] is not None else "-"
+            change_color = "red" if (item['change'] is not None and item['change'] > 0) else "green"
+            advice_class = "buy" if item['advice'] == '买入' else "hold" if item['advice'] in ['增持','持有'] else "sell"
+            
+            # 拼接每一行
+            table_rows += f"""
+            <tr>
+                <td>{item['code']}</td>
+                <td>{item['name']}</td>
+                <td>{price_text}</td>
+                <td style="color: {change_color}">{change_text}</td>
+                <td>{item['score']}</td>
+                <td class="{advice_class}">{item['advice']}</td>
+                <td>{item['trend']}</td>
+            </tr>
+            """
+
+        # 图表数据转JSON字符串，避免f-string里的列表/字典嵌套报错
+        top10_names = json.dumps([item['name'] for item in top10_score], ensure_ascii=False)
+        top10_scores = json.dumps([item['score'] for item in top10_score], ensure_ascii=False)
+        change_names = json.dumps([item['name'] for item in change_data], ensure_ascii=False)
+        change_values = json.dumps([item['change'] for item in change_data], ensure_ascii=False)
+        advice_data = json.dumps([{'name': k, 'value': v} for k, v in advice_count.items()], ensure_ascii=False)
+        advice_count_json = json.dumps(advice_count, ensure_ascii=False)
         
-        # HTML模板（彻底修复f-string语法错误，无任何无效字符）
+        # 基础统计数据
+        total_count = len(df)
+        avg_score = f"{df['score'].mean():.1f}"
+        avg_change = f"{df[df['change'].notna()]['change'].mean():.2f}"
+        report_date = datetime.now().strftime('%Y-%m-%d')
+        
+        # HTML模板（彻底移除所有嵌套f-string，无任何符号冲突）
         html_content = f"""
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>每日股票分析报告 - {datetime.now().strftime('%Y-%m-%d')}</title>
+    <title>每日股票分析报告 - {report_date}</title>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
     <style>
@@ -260,14 +296,14 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
 </head>
 <body>
     <div class="container">
-        <h1>每日股票分析报告 ({datetime.now().strftime('%Y-%m-%d')})</h1>
+        <h1>每日股票分析报告 ({report_date})</h1>
         
         <div class="summary">
             <h3>📊 分析汇总</h3>
-            <p>📈 共分析股票：<strong>{len(df)}</strong> 只</p>
-            <p>🎯 操作建议分布：{json.dumps(advice_count, ensure_ascii=False)}</p>
-            <p>⭐ 平均评分：<strong>{df['score'].mean():.1f}</strong> 分</p>
-            <p>📊 平均涨跌幅：<strong>{df[df['change'].notna()]['change'].mean():.2f}%</strong></p>
+            <p>📈 共分析股票：<strong>{total_count}</strong> 只</p>
+            <p>🎯 操作建议分布：{advice_count_json}</p>
+            <p>⭐ 平均评分：<strong>{avg_score}</strong> 分</p>
+            <p>📊 平均涨跌幅：<strong>{avg_change}%</strong></p>
         </div>
 
         <div class="chart-section">
@@ -318,17 +354,7 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
                     </tr>
                 </thead>
                 <tbody>
-                    {"".join([f"""
-                    <tr>
-                        <td>{item['code']}</td>
-                        <td>{item['name']}</td>
-                        <td>{f"{item['price']:.2f}" if item['price'] is not None else "-"}</td>
-                        <td style="color: {'red' if (item['change'] is not None and item['change'] > 0) else 'green'}">{f"{item['change']:.2f}" if item['change'] is not None else "-"}</td>
-                        <td>{item['score']}</td>
-                        <td class="{'buy' if item['advice']=='买入' else 'hold' if item['advice'] in ['增持','持有'] else 'sell'}">{item['advice']}</td>
-                        <td>{item['trend']}</td>
-                    </tr>
-                    """ for item in stock_table_data])}
+                    {table_rows}
                 </tbody>
             </table>
         </div>
@@ -340,12 +366,12 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
             var scoreChart = echarts.init(document.getElementById('scoreChart'));
             scoreChart.setOption({{
                 title: {{ text: '股票评分TOP10', left: 'center' }},
-                xAxis: {{ type: 'category', data: {[item['name'] for item in top10_score]} }},
+                xAxis: {{ type: 'category', data: {top10_names} }},
                 yAxis: {{ type: 'value', name: '评分' }},
                 series: [{{
                     name: '评分',
                     type: 'bar',
-                    data: {[item['score'] for item in top10_score]},
+                    data: {top10_scores},
                     itemStyle: {{
                         color: function(params) {{
                             var colorList = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e', '#27ae60', '#d35400'];
@@ -360,12 +386,12 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
             var changeChart = echarts.init(document.getElementById('changeChart'));
             changeChart.setOption({{
                 title: {{ text: '个股涨跌幅分布', left: 'center' }},
-                xAxis: {{ type: 'category', data: {[item['name'] for item in change_data]} }},
+                xAxis: {{ type: 'category', data: {change_names} }},
                 yAxis: {{ type: 'value', name: '涨跌幅(%)' }},
                 series: [{{
                     name: '涨跌幅(%)',
                     type: 'line',
-                    data: {[item['change'] for item in change_data]},
+                    data: {change_values},
                     markPoint: {{
                         data: [
                             {{type: 'max', name: '最大值'}},
@@ -389,7 +415,7 @@ def generate_visual_report(analysis_results, output_path="stock_analysis_report.
                     name: '操作建议',
                     type: 'pie',
                     radius: ['40%', '70%'],
-                    data: {[{{'name': k, 'value': v}} for k, v in advice_count.items()]},
+                    data: {advice_data},
                     emphasis: {{
                         itemStyle: {{
                             shadowBlur: 10,
