@@ -1,0 +1,161 @@
+name: 每日股票分析
+
+on:
+  schedule:
+    - cron: '0 10 * * 1-5'  # 每周一至周五18:00（北京时间）自动运行
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      mode:
+        description: '运行模式'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - market-only
+          - stocks-only
+      force_run:
+        description: '强制运行（跳过交易日检查）'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: stock-analysis
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v3
+
+      - name: 设置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'  # 关键：Python 3.10兼容所有依赖
+
+      - name: 安装依赖工具
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq bc
+
+      - name: 自动生成股票列表
+        id: generate_stock_list
+        run: |
+          set +e  # 关闭严格模式，允许单个命令失败，继续执行后续步骤
+          
+          # ====================== 1. 固定的市场指数 ======================
+          BASE_LIST="000001,399100,000016,000010,000009"
+          echo "固定市场指数: $BASE_LIST"
+
+          # ====================== 2. 自动抓取热点板块前10（增强版） ======================
+          echo "正在抓取热点板块前10..."
+          MAX_RETRIES=3
+          RETRY_DELAY=5
+          PLATES=""
+          for ((i=1; i<=MAX_RETRIES; i++)); do
+            echo "第 $i 次尝试抓取板块..."
+            # 执行curl并打印响应内容
+            PLATES_RESPONSE=$(curl -s -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+              "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12")
+            echo "接口响应: $PLATES_RESPONSE"
+            
+            # 检查响应是否包含有效数据
+            if echo "$PLATES_RESPONSE" | grep -q '"data":'; then
+              PLATES=$(echo "$PLATES_RESPONSE" | jq -r '.data.diff | map(.f12) | join(",")' || echo "")
+              if [ -n "$PLATES" ]; then
+                echo "热点板块前10: $PLATES"
+                break
+              else
+                echo "解析板块数据失败"
+              fi
+            else
+              echo "第 $i 次板块抓取失败"
+              if [ $i -lt $MAX_RETRIES ]; then 
+                echo "等待 $RETRY_DELAY 秒后重试..."
+                sleep $RETRY_DELAY
+              fi
+            fi
+          done
+          
+          # 兜底板块（如果抓取失败）
+          if [ -z "$PLATES" ]; then
+            PLATES="801740,885531,885451,801120,801750,801080,801110,801730,801760,801880"
+            echo "启用兜底板块: $PLATES"
+          fi
+
+          # ====================== 3. 自动抓取沪深主板个股前50（5-35元） ======================
+          echo "正在抓取沪深主板个股前50（5-35元）..."
+          STOCKS=""
+          for ((i=1; i<=MAX_RETRIES; i++)); do
+            echo "第 $i 次尝试抓取个股..."
+            STOCKS_RESPONSE=$(curl -s -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+              "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f62&fs=m:0+t:6,m:0+t:80&fields=f12,f2")
+            if echo "$STOCKS_RESPONSE" | grep -q '"data":'; then
+              RAW_STOCKS=$(echo "$STOCKS_RESPONSE" | jq -r '.data.diff | map(select(.f12 | test("^60|^000"))) | map({code: .f12, price: .f2})')
+              FILTERED_STOCKS=$(echo "$RAW_STOCKS" | jq -r 'map(select(.price >= 5 and .price <= 35)) | .[0:50] | map(.code) | join(",")' || echo "")
+              if [ -n "$FILTERED_STOCKS" ]; then
+                STOCKS=$FILTERED_STOCKS
+                echo "过滤后个股前50: $STOCKS"
+                break
+              else
+                echo "过滤个股数据失败"
+              fi
+            else
+              echo "第 $i 次个股抓取失败"
+              if [ $i -lt $MAX_RETRIES ]; then sleep $RETRY_DELAY; fi
+            fi
+          done
+          
+          # 兜底个股（如果抓取失败）
+          if [ -z "$STOCKS" ]; then
+            STOCKS="600000,600008,600009,600015,600016,600018,600019,600028,600029,600030,600031,600036,600048,600050,600089,600104,600111,600123,600143,600150,600166,600177,600183,600276,600309,600340,600362,600406,600438,600482,600547,600585,600604,600690,600703,600745,600795,600887,600900,600918,600958,600989,600999,000001,000002,000004,000005,000006,000008,000012"
+            echo "启用兜底个股: $STOCKS"
+          fi
+
+          # ====================== 4. 合并生成最终STOCK_LIST ======================
+          FINAL_LIST="$BASE_LIST,$PLATES,$STOCKS"
+          FINAL_LIST=$(echo "$FINAL_LIST" | sed 's/^,//;s/,$//;s/,,/,/g')
+          echo "最终STOCK_LIST: $FINAL_LIST"
+          echo "STOCK_LIST=$FINAL_LIST" >> $GITHUB_OUTPUT
+
+      - name: 安装Python依赖（含可视化所需包）
+        run: |
+          pip install -r requirements.txt
+          # 新增：安装可视化所需依赖
+          pip install pandas tushare requests python-dotenv echarts-python
+
+      - name: 运行每日股票分析
+        run: |
+          echo "开始运行每日股票分析..."
+          echo "使用的股票列表: ${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
+          # 关键修改：1. 参数名改为--stocks 2. 增加空格 3. 处理中文参数名兼容
+          python main.py --stocks "${{ steps.generate_stock_list.outputs.STOCK_LIST }}"
+          # 新增：列出生成的文件，方便排查
+          echo "生成的文件列表："
+          ls -la
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+
+      # ====================== 修复：使用英文文件名 + 新增HTML文件上传 ======================
+      - name: 上传股票分析结果文件
+        uses: actions/upload-artifact@v4
+        with:
+          # 关键修改：把中文名称改为英文，避免URL编码问题
+          name: daily-stock-analysis-result-${{ github.run_id }}
+          # 覆盖常见的结果文件格式，新增HTML文件
+          path: |
+            ./result*.csv
+            ./analysis*.csv
+            ./report*.csv
+            ./stock_*.csv
+            ./output*.txt
+            ./logs/*.log
+            ./*.xlsx
+            ./*.json
+            ./*.png
+            ./*.html  # 新增：上传可视化网页
+          # 即使没有生成文件也不报错（兜底）
+          if-no-files-found: warn

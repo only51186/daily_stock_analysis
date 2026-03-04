@@ -1,0 +1,17 @@
+# Replit Configuration for Daily Stock Analysis System
+
+[run]
+command = "python main.py"
+
+[packager]
+language = "python3.11"
+
+[unitTest]
+language = "python3.11"
+
+[debugger]
+support = true
+
+[env]
+PYTHONPATH = "$PYTHONPATH:."
+TZ = "Asia/Shanghai"
