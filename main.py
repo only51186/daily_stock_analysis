@@ -246,6 +246,15 @@ if not stock_codes:
     else:
         logger.error("❌ 未获取到任何股票列表，请检查配置")
         raise SystemExit("错误：未指定股票代码")
+stock_codes = args.codes if args.codes else args.stocks
+if not stock_codes:
+    stock_list_env = os.getenv("STOCK_LIST", "")
+    if stock_list_env:
+        stock_codes = [code.strip() for code in stock_list_env.split(',') if code.strip()]
+        logger.info(f"✅ 从环境变量读取到股票列表，共{len(stock_codes)}只")
+    else:
+        logger.error("❌ 未获取到任何股票列表，请检查配置")
+        raise SystemExit("错误：未指定股票代码")
     
     # 打印系统信息
     print_system_info()
